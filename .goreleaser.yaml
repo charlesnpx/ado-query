@@ -1,0 +1,44 @@
+version: 2
+
+project_name: ado-query
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ado-query
+    main: ./cmd/ado-query
+    binary: ado-query
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    ids:
+      - ado-query
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - README.md
+      - install-skill.sh
+      - agents/**
+      - skills/**
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
