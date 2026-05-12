@@ -7,6 +7,12 @@ description: "Read-only Azure DevOps retrieval for work items, comments, links, 
 
 Use `ado-query` for read-only Azure DevOps context.
 
+When available, check setup first:
+
+```bash
+mise-en-place setup ado-query --capability query
+```
+
 ```bash
 ado-query work-item <id>
 ado-query work-item-tree <id> --max-depth 2
@@ -14,4 +20,4 @@ ado-query work-item-tree <id> --max-depth 2
 
 The CLI writes `content.md`, `content.json`, raw payloads, and optional attachment files to the output directory. Prefer `content.md` for normal context.
 
-Required environment: `AZURE_DEVOPS_PAT` and `ADO_ORG`. `ADO_PROJECT` is needed for comments.
+Auth comes from Azure CLI Microsoft Entra credentials, not an Azure DevOps PAT. Required setup: `az` on PATH, `az login`, and `ADO_ORG`. `ADO_PROJECT` is needed for comments.

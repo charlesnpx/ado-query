@@ -61,7 +61,7 @@ fi
 print_file() { local path="$1"; printf '{"path":"%s"' "$(json_escape "$path")"; if [[ "$OPERATION" == "install" && -f "$path" ]]; then printf ',"sha256":"%s"' "$(sha_file "$path")"; fi; printf '}'; }
 
 first_target=true
-printf '{"schema":1,"name":"%s","version":"%s","operation":"%s","kind":"delegated","targets":{' "$NAME" "$VERSION" "$OPERATION"
+printf '{"schema":1,"name":"%s","version":"%s","operation":"%s","kind":"delegated","capabilities":["query"],"setup":[{"kind":"executable","executable":"az","required_for":["query"],"remediation":"Install Azure CLI, then run az login."},{"kind":"azure-cli-auth","required_for":["query"],"remediation":"Run az login, then verify with az account show."},{"kind":"azure-devops-token","resource":"499b84ac-1321-427f-aa17-267ca6975798","required_for":["query"],"remediation":"Run az login with an account that can access Azure DevOps."},{"kind":"env","env":"ADO_ORG","value_class":"plain","required_for":["query"],"remediation":"Export ADO_ORG to the Azure DevOps organization name."}],"targets":{' "$NAME" "$VERSION" "$OPERATION"
 emit_single() { local target_name="$1"; local path="$2"; [[ "$first_target" == false ]] && printf ','; first_target=false; printf '"%s":{"files":[' "$target_name"; print_file "$path"; printf ']}'; }
 if [[ "$include_tools" == true ]]; then emit_single "tools" "$bin_path"; fi
 if [[ "$include_codex" == true ]]; then [[ "$first_target" == false ]] && printf ','; first_target=false; printf '"codex":{"files":['; print_file "$codex_path"; printf ','; print_file "$codex_agent_path"; printf ']}'; fi

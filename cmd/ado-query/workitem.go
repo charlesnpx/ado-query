@@ -34,7 +34,7 @@ func fetchWorkItem(ctx context.Context, opts queryOptions) (workItemContent, err
 	if err != nil {
 		return workItemContent{}, err
 	}
-	client := newADOClient(opts.pat)
+	client := newADOClient(opts.tokenProvider)
 	cacheBase := filepath.Join(opts.cacheDir, safePath(opts.org), safePath(opts.project))
 	itemURL := workItemURL(opts.org, opts.id, opts.apiVersion)
 	rawItem, err := client.fetchJSON(ctx, itemURL, filepath.Join(cacheBase, "work-item-"+opts.id+".json"), opts.noCache)
@@ -101,11 +101,8 @@ func normalizeOptions(opts queryOptions) (queryOptions, error) {
 	if opts.project == "" {
 		opts.project = os.Getenv("ADO_PROJECT")
 	}
-	if opts.pat == "" {
-		opts.pat = os.Getenv("AZURE_DEVOPS_PAT")
-	}
-	if opts.pat == "" {
-		return opts, fmt.Errorf("missing Azure DevOps PAT; set AZURE_DEVOPS_PAT or pass --pat")
+	if opts.tokenProvider == nil {
+		opts.tokenProvider = azureCLITokenProvider{resource: azureDevOpsResource}
 	}
 	if opts.apiVersion == "" {
 		opts.apiVersion = defaultAPIVersion
@@ -236,7 +233,7 @@ func addAttachment(byGUID map[string]*discoveredAttachment, rawURL, source, file
 	}
 }
 
-func materializeAttachment(ctx context.Context, client adoClient, opts queryOptions, cacheBase string, a discoveredAttachment) attachment {
+func materializeAttachment(ctx context.Context, client *adoClient, opts queryOptions, cacheBase string, a discoveredAttachment) attachment {
 	outName := safeFileName(a.GUID + "__" + a.OriginalFilename)
 	outPath := filepath.Join(opts.outDir, "attachments", outName)
 	cachePath := filepath.Join(cacheBase, "attachment-"+a.GUID+a.Extension)
