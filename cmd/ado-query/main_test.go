@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+type staticTokenProvider string
+
+func (p staticTokenProvider) Token(context.Context) (string, error) {
+	return string(p), nil
+}
+
 func TestDiscoverAttachmentsFromHTMLAndRelations(t *testing.T) {
 	workItem := map[string]any{
 		"fields":    map[string]any{"System.Description": `<img src="https://dev.azure.com/o/p/_apis/wit/attachments/abc?fileName=one.png">`},
@@ -53,7 +59,7 @@ func TestFetchWorkItemWritesContentAndUsesCache(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), pat: "token"}
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token")}
 	content, err := fetchWorkItem(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)

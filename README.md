@@ -28,9 +28,10 @@ For delegated installers:
 ## Usage
 
 ```bash
-export AZURE_DEVOPS_PAT=...
+az login
 export ADO_ORG=NPXInnovation
 export ADO_PROJECT=ECHO
+mise-en-place setup ado-query --capability query
 
 ado-query work-item 12345
 ado-query work-item 12345 --include-attachments
@@ -44,11 +45,16 @@ Common flags:
 - `--out <dir>` defaults to `./.ado-query/<id>`
 - `--cache-dir <dir>` defaults to `~/.cache/ado-query`
 - `--no-cache` bypasses cache reads and writes
-- `--pat <token>` defaults to `$AZURE_DEVOPS_PAT`
 - `--api-version <ver>` defaults to `7.1`
 - `--include-attachments` downloads attachments and tries `markitdown`
 - `--max-attachment-bytes <n>` defaults to `25000000`
 
 `work-item-tree` also accepts `--max-depth` and `--max-items`.
+
+Auth uses the current Azure CLI Microsoft Entra login. The CLI fetches an Azure DevOps bearer token at runtime with:
+
+```bash
+az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv
+```
 
 `markitdown` is invoked as a subprocess. If it is missing, HTML fields are preserved in fenced `html` blocks and attachment conversion is skipped with warnings.
