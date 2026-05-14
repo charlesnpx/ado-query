@@ -29,8 +29,8 @@ For delegated installers:
 
 ```bash
 az login
-export ADO_ORG=NPXInnovation
-export ADO_PROJECT=ECHO
+export ADO_ORG=ExampleOrg
+export ADO_PROJECT=ExampleProject
 mise-en-place setup ado-query --capability query
 
 ado-query work-item 12345
