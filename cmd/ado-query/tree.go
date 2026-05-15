@@ -15,6 +15,7 @@ type queueItem struct {
 
 func fetchWorkItemTree(ctx context.Context, opts queryOptions) (treeContent, error) {
 	var err error
+	opts.tree = true
 	opts, err = normalizeOptions(opts)
 	if err != nil {
 		return treeContent{}, err

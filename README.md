@@ -42,14 +42,16 @@ Common flags:
 
 - `--org <org>` defaults to `$ADO_ORG`
 - `--project <project>` defaults to `$ADO_PROJECT`
-- `--out <dir>` defaults to `./.ado-query/<id>`
+- `--out <dir>` defaults to `~/.cache/ado-query/outputs/<org>/<project>/work-items/<id>`
 - `--cache-dir <dir>` defaults to `~/.cache/ado-query`
 - `--no-cache` bypasses cache reads and writes
 - `--api-version <ver>` defaults to `7.1`
 - `--include-attachments` downloads attachments and tries `markitdown`
 - `--max-attachment-bytes <n>` defaults to `25000000`
 
-`work-item-tree` also accepts `--max-depth` and `--max-items`.
+`work-item-tree` also accepts `--max-depth` and `--max-items`; its omitted `--out` default is `~/.cache/ado-query/outputs/<org>/<project>/work-item-trees/<id>`.
+
+Pass an explicit relative `--out` if you want output materialized in the caller's directory.
 
 Auth uses the current Azure CLI Microsoft Entra login. The CLI fetches an Azure DevOps bearer token at runtime with:
 

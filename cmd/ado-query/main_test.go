@@ -80,6 +80,100 @@ func TestFetchWorkItemWritesContentAndUsesCache(t *testing.T) {
 	}
 }
 
+func TestFetchWorkItemDefaultsOutputUnderCache(t *testing.T) {
+	tmp := t.TempDir()
+	cwd := filepath.Join(tmp, "cwd")
+	if err := os.Mkdir(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     123,
+				"fields": map[string]any{"System.Title": "Example", "System.State": "Active"},
+				"relations": []any{map[string]any{
+					"rel":        "AttachedFile",
+					"url":        serverURL(r) + "/org/_apis/wit/attachments/abc?fileName=one.bin",
+					"attributes": map[string]any{"name": "one.bin"},
+				}},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		case "/org/_apis/wit/attachments/abc":
+			_, _ = w.Write([]byte("attachment"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{
+		id: "123", org: server.URL + "/org", project: "proj",
+		cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true, tokenProvider: staticTokenProvider("token"),
+	}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	outDir := defaultOutputDir(opts)
+	for _, path := range []string{
+		filepath.Join(outDir, "content.md"),
+		filepath.Join(outDir, "attachments", "abc__one.bin"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected cache-backed output %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".ado-query")); !os.IsNotExist(err) {
+		t.Fatalf("default output created cwd .ado-query: %v", err)
+	}
+}
+
+func TestFetchWorkItemTreeDefaultsOutputUnderCache(t *testing.T) {
+	tmp := t.TempDir()
+	cwd := filepath.Join(tmp, "cwd")
+	if err := os.Mkdir(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     123,
+				"fields": map[string]any{"System.Title": "Root", "System.State": "Active"},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{
+		id: "123", org: server.URL + "/org", project: "proj",
+		cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token"),
+	}
+	if _, err := fetchWorkItemTree(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.tree = true
+	expectedRoot := filepath.Join(defaultOutputDir(opts), "content.md")
+	expectedItem := filepath.Join(defaultOutputDir(opts), "items", "123", "content.md")
+	for _, path := range []string{expectedRoot, expectedItem} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected cache-backed output %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".ado-query")); !os.IsNotExist(err) {
+		t.Fatalf("default output created cwd .ado-query: %v", err)
+	}
+}
+
 func TestMissingMarkitdownFallsBackToHTML(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	warnings := []string{}

@@ -12,6 +12,7 @@ const (
 type queryOptions struct {
 	id, org, project, outDir, cacheDir, apiVersion string
 	noCache, includeAttachments                    bool
+	tree                                           bool
 	maxAttachmentBytes                             int64
 	maxDepth, maxItems                             int
 	tokenProvider                                  tokenProvider
