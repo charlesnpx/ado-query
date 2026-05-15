@@ -2,7 +2,7 @@ package main
 
 import ("bytes"; "fmt"; "os"; "os/exec"; "path/filepath"; "strings")
 
-var markitdownable = set(".pdf", ".docx", ".xlsx", ".pptx", ".png", ".jpg", ".jpeg", ".html", ".htm", ".txt", ".md", ".csv", ".json", ".xml", ".rtf")
+var markitdownable = set(".pdf", ".docx", ".xlsx", ".pptx", ".html", ".htm", ".txt", ".md", ".csv", ".json", ".xml", ".rtf")
 func markdownify(srcPath string) (string, error) { bin, err := exec.LookPath("markitdown"); if err != nil { return "", err }; cmd := exec.Command(bin, srcPath); var out, errBuf bytes.Buffer; cmd.Stdout = &out; cmd.Stderr = &errBuf; if err := cmd.Run(); err != nil { return "", fmt.Errorf("markitdown %s: %w (%s)", srcPath, err, strings.TrimSpace(errBuf.String())) }; return out.String(), nil }
 func htmlToMarkdown(label, html string, warnings *[]string) string {
 	if strings.TrimSpace(html) == "" { return "" }; tmp, err := os.CreateTemp("", "ado-query-*.html"); if err != nil { *warnings = append(*warnings, "failed to create temp file for "+label+": "+err.Error()); return fencedHTML(html) }
