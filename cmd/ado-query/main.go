@@ -45,6 +45,10 @@ func runWorkItem(args []string) error {
 	if err != nil {
 		return err
 	}
+	opts, err = normalizeOptions(opts)
+	if err != nil {
+		return err
+	}
 	_, err = fetchWorkItem(context.Background(), opts)
 	if err == nil {
 		fmt.Println(opts.outDir)
@@ -56,6 +60,10 @@ func runTree(args []string) error {
 	if err != nil {
 		return err
 	}
+	opts, err = normalizeOptions(opts)
+	if err != nil {
+		return err
+	}
 	_, err = fetchWorkItemTree(context.Background(), opts)
 	if err == nil {
 		fmt.Println(opts.outDir)
@@ -64,7 +72,7 @@ func runTree(args []string) error {
 }
 func parseQueryFlags(name string, args []string, tree bool) (queryOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	opts := queryOptions{}
+	opts := queryOptions{tree: tree}
 	fs.StringVar(&opts.org, "org", "", "Azure DevOps organization")
 	fs.StringVar(&opts.project, "project", "", "Azure DevOps project")
 	fs.StringVar(&opts.outDir, "out", "", "Output directory")
@@ -94,9 +102,6 @@ func parseQueryFlags(name string, args []string, tree bool) (queryOptions, error
 		return opts, errors.New("--max-depth must be non-negative and --max-items must be positive")
 	}
 	opts.id = id
-	if opts.outDir == "" {
-		opts.outDir = ".ado-query/" + id
-	}
 	return opts, nil
 }
 func splitArgs(args []string, valueFlags map[string]bool) ([]string, string, error) {

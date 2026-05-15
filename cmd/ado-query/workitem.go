@@ -115,12 +115,20 @@ func normalizeOptions(opts queryOptions) (queryOptions, error) {
 		opts.cacheDir = cacheDir
 	}
 	if opts.outDir == "" {
-		opts.outDir = filepath.Join(".ado-query", opts.id)
+		opts.outDir = defaultOutputDir(opts)
 	}
 	if opts.maxAttachmentBytes <= 0 {
 		opts.maxAttachmentBytes = defaultMaxAttachmentBytes
 	}
 	return opts, nil
+}
+
+func defaultOutputDir(opts queryOptions) string {
+	kind := "work-items"
+	if opts.tree {
+		kind = "work-item-trees"
+	}
+	return filepath.Join(opts.cacheDir, "outputs", safePath(opts.org), safePath(opts.project), kind, safePath(opts.id))
 }
 
 func normalizeFields(raw map[string]any, warnings *[]string) fields {

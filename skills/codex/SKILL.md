@@ -18,7 +18,7 @@ ado-query work-item <id>
 ado-query work-item-tree <id> --max-depth 2 --max-items 50
 ```
 
-The CLI writes `content.md`, `content.json`, raw payloads, and optional attachments. Read `content.md` first, then inspect `content.json`, `raw/`, or `attachments/` when needed.
+The CLI writes `content.md`, `content.json`, raw payloads, and optional attachments under its output directory, which defaults to `~/.cache/ado-query/outputs/...`. Read `content.md` first, then inspect `content.json`, `raw/`, or `attachments/` when needed. Pass `--out <dir>` only when a caller-local output directory is required.
 
 Auth comes from Azure CLI Microsoft Entra credentials, not an Azure DevOps PAT. The user must be logged in with `az login`; `ADO_ORG` supplies the organization, and `ADO_PROJECT` enables comments.
 
