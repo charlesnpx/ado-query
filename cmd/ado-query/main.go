@@ -28,6 +28,22 @@ func run(args []string) error {
 		return runWorkItem(args[1:])
 	case "work-item-tree":
 		return runTree(args[1:])
+	case "comments":
+		return runComments(args[1:])
+	case "pr-list":
+		return runPRList(args[1:])
+	case "pr-get":
+		return runPRGet(args[1:])
+	case "pr-threads":
+		return runPRThreads(args[1:])
+	case "wiql":
+		return runWIQL(args[1:])
+	case "search-code":
+		return runSearchCode(args[1:])
+	case "api":
+		return runAPI(args[1:])
+	case "download-url":
+		return runDownloadURL(args[1:])
 	case "install-skill":
 		return runInstaller(args[1:])
 	case "--version", "-version", "version":
@@ -144,6 +160,14 @@ func usage() {
 	fmt.Println(`Usage:
   ado-query work-item <id> [flags]
   ado-query work-item-tree <id> [flags]
+  ado-query comments <work-item-id> [flags]
+  ado-query pr-list <repo> [status] [flags]
+  ado-query pr-get <repo> <pr-id> [flags]
+  ado-query pr-threads <repo> <pr-id> [flags]
+  ado-query wiql <query-or-@file> [flags]
+  ado-query search-code <text> [--top 25] [flags]
+  ado-query api <path-or-url> [flags]
+  ado-query download-url <url> <output-path> [flags]
   ado-query install-skill [--plan|--install|--uninstall] [--target all|claude|codex|tools] [--json] [--install-root <dir>]
   ado-query --version | --help
 

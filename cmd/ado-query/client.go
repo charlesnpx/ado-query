@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,6 +102,35 @@ func (c *adoClient) fetchJSON(ctx context.Context, rawURL, cachePath string, noC
 	return json.RawMessage(body), nil
 }
 
+func (c *adoClient) postJSON(ctx context.Context, rawURL string, value any) (json.RawMessage, error) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if err := c.authorize(ctx, req); err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("POST %s: %s: %s", rawURL, res.Status, strings.TrimSpace(string(responseBody)))
+	}
+	return json.RawMessage(responseBody), nil
+}
+
 func (c *adoClient) download(ctx context.Context, rawURL, dst string, maxBytes int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -163,6 +193,26 @@ func workItemURL(org, id, apiVersion string) string {
 
 func commentsURL(org, project, id string) string {
 	return orgURL(org, fmt.Sprintf("/%s/_apis/wit/workItems/%s/comments?api-version=7.1-preview.4", url.PathEscape(project), url.PathEscape(id)))
+}
+
+func pullRequestsURL(org, project, repo, status, apiVersion string) string {
+	return orgURL(org, fmt.Sprintf("/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=%s&api-version=%s", url.PathEscape(project), url.PathEscape(repo), url.QueryEscape(status), url.QueryEscape(apiVersion)))
+}
+
+func pullRequestURL(org, project, repo, id, apiVersion string) string {
+	return orgURL(org, fmt.Sprintf("/%s/_apis/git/repositories/%s/pullrequests/%s?api-version=%s", url.PathEscape(project), url.PathEscape(repo), url.PathEscape(id), url.QueryEscape(apiVersion)))
+}
+
+func pullRequestThreadsURL(org, project, repo, id, apiVersion string) string {
+	return orgURL(org, fmt.Sprintf("/%s/_apis/git/repositories/%s/pullrequests/%s/threads?api-version=%s", url.PathEscape(project), url.PathEscape(repo), url.PathEscape(id), url.QueryEscape(apiVersion)))
+}
+
+func wiqlURL(org, project, apiVersion string) string {
+	return orgURL(org, fmt.Sprintf("/%s/_apis/wit/wiql?api-version=%s", url.PathEscape(project), url.QueryEscape(apiVersion)))
+}
+
+func codeSearchURL(org, apiVersion string) string {
+	return "https://almsearch.dev.azure.com/" + url.PathEscape(org) + "/_apis/search/codesearchresults?api-version=" + url.QueryEscape(apiVersion)
 }
 
 func orgURL(org, path string) string {

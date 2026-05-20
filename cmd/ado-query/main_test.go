@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -190,6 +191,156 @@ func TestSplitArgsAcceptsFlagsAfterID(t *testing.T) {
 	}
 	if id != "123" || len(flags) != 3 {
 		t.Fatalf("id=%q flags=%v", id, flags)
+	}
+}
+
+func TestFetchRawQueryCommands(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{map[string]any{"id": 1}}})
+		case "/org/proj/_apis/git/repositories/repo/pullrequests":
+			if r.URL.Query().Get("searchCriteria.status") != "completed" {
+				t.Fatalf("status query = %q", r.URL.Query().Get("searchCriteria.status"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"count": 1})
+		case "/org/proj/_apis/git/repositories/repo/pullrequests/99":
+			_ = json.NewEncoder(w).Encode(map[string]any{"pullRequestId": 99})
+		case "/org/proj/_apis/git/repositories/repo/pullrequests/99/threads":
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{org: server.URL + "/org", project: "proj", tokenProvider: staticTokenProvider("token")}
+	opts.id = "123"
+	for name, fn := range map[string]func() (json.RawMessage, error){
+		"comments": func() (json.RawMessage, error) { return fetchComments(context.Background(), opts) },
+		"pr-list": func() (json.RawMessage, error) {
+			return fetchPullRequests(context.Background(), opts, "repo", "completed")
+		},
+		"pr-get": func() (json.RawMessage, error) { return fetchPullRequest(context.Background(), opts, "repo", "99") },
+		"pr-threads": func() (json.RawMessage, error) {
+			return fetchPullRequestThreads(context.Background(), opts, "repo", "99")
+		},
+	} {
+		if body, err := fn(); err != nil || len(body) == 0 {
+			t.Fatalf("%s body=%q err=%v", name, body, err)
+		}
+	}
+}
+
+func TestFetchWIQLSendsPostBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/org/proj/_apis/wit/wiql" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["query"] != "SELECT [System.Id] FROM WorkItems" {
+			t.Fatalf("body = %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"workItems": []any{}})
+	}))
+	defer server.Close()
+
+	opts := queryOptions{org: server.URL + "/org", project: "proj", tokenProvider: staticTokenProvider("token")}
+	body, err := fetchWIQL(context.Background(), opts, "SELECT [System.Id] FROM WorkItems")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "workItems") {
+		t.Fatalf("body = %s", body)
+	}
+
+	queryFile := filepath.Join(t.TempDir(), "query.wiql")
+	if err := os.WriteFile(queryFile, []byte("SELECT * FROM WorkItems"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	query, err := wiqlQueryText("@" + queryFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "SELECT * FROM WorkItems" {
+		t.Fatalf("query = %q", query)
+	}
+}
+
+func TestFetchAPIAcceptsFullURLWithoutOrg(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/custom" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	opts := queryOptions{tokenProvider: staticTokenProvider("token")}
+	body, err := fetchAPI(context.Background(), opts, server.URL+"/custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "ok") {
+		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestCodeSearchHelpers(t *testing.T) {
+	if got := codeSearchURL("NPXInnovation", "7.1"); got != "https://almsearch.dev.azure.com/NPXInnovation/_apis/search/codesearchresults?api-version=7.1" {
+		t.Fatalf("url = %q", got)
+	}
+	body := codeSearchBody("ECHO", "risk query", 25)
+	if body["searchText"] != "risk query" || body["$top"] != 25 {
+		t.Fatalf("body = %+v", body)
+	}
+	filters := body["filters"].(map[string][]string)
+	if len(filters["Project"]) != 1 || filters["Project"][0] != "ECHO" {
+		t.Fatalf("filters = %+v", filters)
+	}
+}
+
+func TestDownloadURLWritesFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "attachment")
+	}))
+	defer server.Close()
+
+	out := filepath.Join(t.TempDir(), "nested", "attachment.txt")
+	opts := queryOptions{maxAttachmentBytes: 20, tokenProvider: staticTokenProvider("token")}
+	if err := downloadURL(context.Background(), opts, server.URL, out); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "attachment" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestParseStandardQueryFlagsUsesEnvAndFlagsAfterPositionals(t *testing.T) {
+	t.Setenv("ADO_ORG", "env-org")
+	t.Setenv("ADO_PROJECT", "env-project")
+	opts, positionals, err := parseStandardQueryFlags("pr-list", []string{"repo", "completed", "--project", "flag-project", "--api-version", "7.2"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.org != "env-org" || opts.project != "flag-project" || opts.apiVersion != "7.2" {
+		t.Fatalf("opts = %+v", opts)
+	}
+	if strings.Join(positionals, ",") != "repo,completed" {
+		t.Fatalf("positionals = %+v", positionals)
 	}
 }
 
