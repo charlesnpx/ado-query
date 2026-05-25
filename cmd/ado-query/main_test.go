@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,18 @@ type staticTokenProvider string
 
 func (p staticTokenProvider) Token(context.Context) (string, error) {
 	return string(p), nil
+}
+
+type failAfterTokenProvider struct {
+	token string
+	fail  *bool
+}
+
+func (p failAfterTokenProvider) Token(context.Context) (string, error) {
+	if *p.fail {
+		return "", errors.New("token unavailable")
+	}
+	return p.token, nil
 }
 
 func TestDiscoverAttachmentsFromHTMLAndRelations(t *testing.T) {
@@ -166,6 +179,45 @@ func TestFetchWorkItemUsesStaleCacheWhenRefreshFails(t *testing.T) {
 	}
 }
 
+func TestFetchWorkItemUsesStaleCacheWhenAuthFails(t *testing.T) {
+	tmp := t.TempDir()
+	failAuth := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": "Cached", "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{
+		id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"),
+		tokenProvider: failAfterTokenProvider{token: "token", fail: &failAuth},
+	}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	failAuth = true
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Fields.Title != "Cached" {
+		t.Fatalf("title = %q, want Cached", content.Fields.Title)
+	}
+	if !warningsContain(content.Warnings, "using stale cached work-item-123.json") || !warningsContain(content.Warnings, "token unavailable") {
+		t.Fatalf("warnings = %+v", content.Warnings)
+	}
+}
+
 func TestFetchWorkItemUsesValidatorsForUnchangedJSON(t *testing.T) {
 	tmp := t.TempDir()
 	workItemCalls := 0
@@ -252,6 +304,40 @@ func TestFetchWorkItemRetriesMissingAttachment(t *testing.T) {
 	}
 }
 
+func TestFetchWorkItemDoesNotLinkStaleOutputForMissingAttachment(t *testing.T) {
+	tmp := t.TempDir()
+	attachmentOK := false
+	server := attachmentServer(t, &attachmentOK, nil)
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true, tokenProvider: staticTokenProvider("token")}
+	staleOut := filepath.Join(opts.outDir, "attachments", "abc__one.bin")
+	if err := os.MkdirAll(filepath.Dir(staleOut), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleOut, []byte("old output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleOut+".md", []byte("old markdown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := content.Attachments[0]
+	if att.Status != "missing" || att.AssetPath != "" || att.MarkdownPath != "" {
+		t.Fatalf("attachment = %+v", att)
+	}
+	if _, err := os.Stat(staleOut); !os.IsNotExist(err) {
+		t.Fatalf("expected stale output to be removed, err=%v", err)
+	}
+	if _, err := os.Stat(staleOut + ".md"); !os.IsNotExist(err) {
+		t.Fatalf("expected stale markdown to be removed, err=%v", err)
+	}
+}
+
 func TestFetchWorkItemUsesStaleCachedAttachmentWhenRefreshFails(t *testing.T) {
 	tmp := t.TempDir()
 	attachmentOK := true
@@ -270,6 +356,39 @@ func TestFetchWorkItemUsesStaleCachedAttachmentWhenRefreshFails(t *testing.T) {
 	}
 	att := content.Attachments[0]
 	if att.Status != "cached-stale" || !warningsContain(att.Warnings, "using stale cached attachment-abc.bin") {
+		t.Fatalf("attachment = %+v", att)
+	}
+	got, err := os.ReadFile(filepath.Join(opts.outDir, filepath.FromSlash(att.AssetPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old attachment" {
+		t.Fatalf("attachment body = %q", got)
+	}
+}
+
+func TestFetchWorkItemUsesStaleCachedAttachmentWhenAuthFails(t *testing.T) {
+	tmp := t.TempDir()
+	failAuth := false
+	attachmentOK := true
+	body := "old attachment"
+	server := attachmentServer(t, &attachmentOK, &body)
+	defer server.Close()
+
+	opts := queryOptions{
+		id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true,
+		tokenProvider: failAfterTokenProvider{token: "token", fail: &failAuth},
+	}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	failAuth = true
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := content.Attachments[0]
+	if att.Status != "cached-stale" || att.AssetPath == "" || !warningsContain(att.Warnings, "token unavailable") {
 		t.Fatalf("attachment = %+v", att)
 	}
 	got, err := os.ReadFile(filepath.Join(opts.outDir, filepath.FromSlash(att.AssetPath)))

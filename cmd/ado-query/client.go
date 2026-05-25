@@ -105,6 +105,9 @@ func (c *adoClient) fetchJSONCached(ctx context.Context, rawURL, cachePath strin
 		return cachedJSONResult{}, err
 	}
 	if err := c.authorize(ctx, req); err != nil {
+		if hasCache {
+			return c.staleJSONResult(rawURL, cachePath, cachedBody, 0, err), nil
+		}
 		return cachedJSONResult{}, err
 	}
 	req.Header.Set("Accept", "application/json")
@@ -238,7 +241,10 @@ func (c *adoClient) downloadCached(ctx context.Context, rawURL, cachePath string
 		return cachedDownloadResult{}, err
 	}
 	if err := c.authorize(ctx, req); err != nil {
-		return cachedDownloadResult{}, err
+		if hasCache {
+			return staleDownloadResult(rawURL, cachePath, 0, err), nil
+		}
+		return cachedDownloadResult{Status: "missing"}, err
 	}
 	if hasCache {
 		readCacheMetadata(cachePath).applyValidators(req)

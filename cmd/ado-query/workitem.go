@@ -286,7 +286,13 @@ func materializeAttachment(ctx context.Context, client *adoClient, opts queryOpt
 		}
 	}
 	mdRel := ""
-	assetRel := relIfExists(opts.outDir, outPath)
+	assetRel := ""
+	if status != "missing" {
+		assetRel = relIfExists(opts.outDir, outPath)
+	} else {
+		_ = os.Remove(outPath)
+		_ = os.Remove(outPath + ".md")
+	}
 	if assetRel != "" {
 		mdPath := ""
 		cachedMD := filepath.Join(cacheBase, "attachment-"+a.GUID+".md")
