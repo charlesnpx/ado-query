@@ -37,39 +37,51 @@ func fetchWorkItem(ctx context.Context, opts queryOptions) (workItemContent, err
 	client := newADOClient(opts.tokenProvider)
 	cacheBase := filepath.Join(opts.cacheDir, safePath(opts.org), safePath(opts.project))
 	itemURL := workItemURL(opts.org, opts.id, opts.apiVersion)
-	rawItem, err := client.fetchJSON(ctx, itemURL, filepath.Join(cacheBase, "work-item-"+opts.id+".json"), opts.noCache)
+	warnings := []string{}
+	itemResult, err := client.fetchJSONCached(ctx, itemURL, filepath.Join(cacheBase, "work-item-"+opts.id+".json"), opts.noCache)
 	if err != nil {
 		return workItemContent{}, err
 	}
+	if itemResult.Warning != "" {
+		warnings = append(warnings, itemResult.Warning)
+	}
+	rawItem := itemResult.Body
 	var workItem map[string]any
 	if err := json.Unmarshal(rawItem, &workItem); err != nil {
 		return workItemContent{}, err
 	}
 
-	warnings := []string{}
 	rawComments := json.RawMessage{}
 	comments := map[string]any{}
 	if opts.project != "" {
-		rawComments, err = client.fetchJSON(ctx, commentsURL(opts.org, opts.project, opts.id), filepath.Join(cacheBase, "comments-"+opts.id+".json"), opts.noCache)
+		commentResult, err := client.fetchJSONCached(ctx, commentsURL(opts.org, opts.project, opts.id), filepath.Join(cacheBase, "comments-"+opts.id+".json"), opts.noCache)
 		if err != nil {
 			warnings = append(warnings, "failed to fetch comments: "+err.Error())
-		} else if err := json.Unmarshal(rawComments, &comments); err != nil {
-			return workItemContent{}, err
+		} else {
+			if commentResult.Warning != "" {
+				warnings = append(warnings, commentResult.Warning)
+			}
+			rawComments = commentResult.Body
+			if err := json.Unmarshal(rawComments, &comments); err != nil {
+				return workItemContent{}, err
+			}
 		}
 	} else {
 		warnings = append(warnings, "ADO project not set; comments were not fetched")
 	}
 
 	rawFields := asMap(workItem["fields"])
+	normalizedFields := normalizeFields(rawFields, &warnings)
+	normalizedComments := normalizeComments(comments, &warnings)
 	content := workItemContent{
 		ID:        opts.id,
 		URL:       itemURL,
 		Org:       opts.org,
 		Project:   opts.project,
 		FetchedAt: time.Now().UTC(),
-		Fields:    normalizeFields(rawFields, &warnings),
+		Fields:    normalizedFields,
 		Relations: normalizeRelations(workItem),
-		Comments:  normalizeComments(comments, &warnings),
+		Comments:  normalizedComments,
 		Warnings:  warnings,
 	}
 	discovered := discoverAttachments(workItem, comments)
@@ -79,7 +91,7 @@ func fetchWorkItem(ctx context.Context, opts queryOptions) (workItemContent, err
 		}
 	} else {
 		for _, discovered := range discovered {
-			content.Attachments = append(content.Attachments, attachment{GUID: discovered.GUID, URL: discovered.URL, OriginalFilename: discovered.OriginalFilename, Extension: discovered.Extension, Sources: discovered.Sources})
+			content.Attachments = append(content.Attachments, attachment{GUID: discovered.GUID, URL: discovered.URL, OriginalFilename: discovered.OriginalFilename, Extension: discovered.Extension, Sources: discovered.Sources, Status: "discovered"})
 		}
 	}
 	for _, att := range content.Attachments {
@@ -246,27 +258,39 @@ func materializeAttachment(ctx context.Context, client *adoClient, opts queryOpt
 	outPath := filepath.Join(opts.outDir, "attachments", outName)
 	cachePath := filepath.Join(cacheBase, "attachment-"+a.GUID+a.Extension)
 	warnings := []string{}
+	status := "missing"
+	changed := false
 	if opts.noCache {
 		if err := client.download(ctx, a.URL, outPath, opts.maxAttachmentBytes); err != nil {
 			warnings = append(warnings, "failed to download "+a.OriginalFilename+": "+err.Error())
+		} else {
+			status = "downloaded"
+			changed = true
 		}
 	} else {
-		if _, err := os.Stat(cachePath); err != nil {
-			if err := client.download(ctx, a.URL, cachePath, opts.maxAttachmentBytes); err != nil {
-				warnings = append(warnings, "failed to download "+a.OriginalFilename+": "+err.Error())
+		result, err := client.downloadCached(ctx, a.URL, cachePath, opts.maxAttachmentBytes)
+		if err != nil {
+			warnings = append(warnings, "failed to download "+a.OriginalFilename+": "+err.Error())
+		} else {
+			status = result.Status
+			changed = result.Changed
+			if result.Warning != "" {
+				warnings = append(warnings, result.Warning)
 			}
 		}
-		if len(warnings) == 0 {
+		if status != "missing" {
 			if err := copyFile(cachePath, outPath); err != nil {
 				warnings = append(warnings, "failed to copy "+a.OriginalFilename+": "+err.Error())
+				status = "missing"
 			}
 		}
 	}
 	mdRel := ""
-	if len(warnings) == 0 {
+	assetRel := relIfExists(opts.outDir, outPath)
+	if assetRel != "" {
 		mdPath := ""
 		cachedMD := filepath.Join(cacheBase, "attachment-"+a.GUID+".md")
-		if !opts.noCache && copyFile(cachedMD, outPath+".md") == nil {
+		if !opts.noCache && !changed && copyFile(cachedMD, outPath+".md") == nil {
 			mdPath = outPath + ".md"
 		} else {
 			mdPath = convertAttachment(outPath, &warnings)
@@ -278,5 +302,5 @@ func materializeAttachment(ctx context.Context, client *adoClient, opts queryOpt
 			}
 		}
 	}
-	return attachment{GUID: a.GUID, URL: a.URL, OriginalFilename: a.OriginalFilename, Extension: a.Extension, Sources: a.Sources, AssetPath: relIfExists(opts.outDir, outPath), MarkdownPath: mdRel, Warnings: warnings}
+	return attachment{GUID: a.GUID, URL: a.URL, OriginalFilename: a.OriginalFilename, Extension: a.Extension, Sources: a.Sources, Status: status, AssetPath: assetRel, MarkdownPath: mdRel, Warnings: warnings}
 }

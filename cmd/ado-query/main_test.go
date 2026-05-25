@@ -33,7 +33,7 @@ func TestDiscoverAttachmentsFromHTMLAndRelations(t *testing.T) {
 	}
 }
 
-func TestFetchWorkItemWritesContentAndUsesCache(t *testing.T) {
+func TestFetchWorkItemWritesContentAndValidatesCache(t *testing.T) {
 	tmp := t.TempDir()
 	markitdown := filepath.Join(tmp, "markitdown")
 	if err := os.WriteFile(markitdown, []byte("#!/bin/sh\nsed 's/<[^>]*>//g' \"$1\"\n"), 0o755); err != nil {
@@ -68,8 +68,8 @@ func TestFetchWorkItemWritesContentAndUsesCache(t *testing.T) {
 	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
+	if calls != 4 {
+		t.Fatalf("calls = %d, want 4", calls)
 	}
 	if content.Fields.Description != "Hello" || len(content.Comments) != 1 || content.Relations.ChildIDs[0] != "456" {
 		t.Fatalf("content = %+v", content)
@@ -78,6 +78,269 @@ func TestFetchWorkItemWritesContentAndUsesCache(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(opts.outDir, rel)); err != nil {
 			t.Fatalf("expected %s: %v", rel, err)
 		}
+	}
+	for _, rel := range []string{"work-item-123.meta.json", "comments-123.meta.json"} {
+		if _, err := os.Stat(filepath.Join(opts.cacheDir, safePath(opts.org), safePath(opts.project), rel)); err != nil {
+			t.Fatalf("expected cache metadata %s: %v", rel, err)
+		}
+	}
+}
+
+func TestFetchWorkItemRefreshesChangedCachedJSON(t *testing.T) {
+	tmp := t.TempDir()
+	title := "Initial"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": title, "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	title = "Updated"
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Fields.Title != "Updated" {
+		t.Fatalf("title = %q, want Updated", content.Fields.Title)
+	}
+	body, err := os.ReadFile(filepath.Join(opts.cacheDir, safePath(opts.org), safePath(opts.project), "work-item-123.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Updated") {
+		t.Fatalf("cache was not refreshed: %s", body)
+	}
+}
+
+func TestFetchWorkItemUsesStaleCacheWhenRefreshFails(t *testing.T) {
+	tmp := t.TempDir()
+	failWorkItem := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			if failWorkItem {
+				http.Error(w, "temporary outage", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": "Cached", "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	failWorkItem = true
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Fields.Title != "Cached" {
+		t.Fatalf("title = %q, want Cached", content.Fields.Title)
+	}
+	if !warningsContain(content.Warnings, "using stale cached work-item-123.json") {
+		t.Fatalf("warnings = %+v", content.Warnings)
+	}
+}
+
+func TestFetchWorkItemUsesValidatorsForUnchangedJSON(t *testing.T) {
+	tmp := t.TempDir()
+	workItemCalls := 0
+	commentCalls := 0
+	workItemValidatorSeen := false
+	commentValidatorSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			workItemCalls++
+			if workItemCalls == 2 {
+				workItemValidatorSeen = r.Header.Get("If-None-Match") == `"workitem"`
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("ETag", `"workitem"`)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": "Cached", "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			commentCalls++
+			if commentCalls == 2 {
+				commentValidatorSeen = r.Header.Get("If-None-Match") == `"comments"`
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("ETag", `"comments"`)
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content.Fields.Title != "Cached" {
+		t.Fatalf("title = %q, want Cached", content.Fields.Title)
+	}
+	if workItemCalls != 2 || commentCalls != 2 || !workItemValidatorSeen || !commentValidatorSeen {
+		t.Fatalf("workItemCalls=%d commentCalls=%d workItemValidatorSeen=%v commentValidatorSeen=%v", workItemCalls, commentCalls, workItemValidatorSeen, commentValidatorSeen)
+	}
+}
+
+func TestFetchWorkItemRetriesMissingAttachment(t *testing.T) {
+	tmp := t.TempDir()
+	attachmentOK := false
+	server := attachmentServer(t, &attachmentOK, nil)
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true, tokenProvider: staticTokenProvider("token")}
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := content.Attachments[0]
+	if att.Status != "missing" || att.AssetPath != "" || !warningsContain(att.Warnings, "failed to download one.bin") {
+		t.Fatalf("attachment after failed download = %+v", att)
+	}
+
+	attachmentOK = true
+	content, err = fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att = content.Attachments[0]
+	if att.Status != "downloaded" || att.AssetPath == "" {
+		t.Fatalf("attachment after retry = %+v", att)
+	}
+	body, err := os.ReadFile(filepath.Join(opts.outDir, filepath.FromSlash(att.AssetPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "attachment" {
+		t.Fatalf("attachment body = %q", body)
+	}
+}
+
+func TestFetchWorkItemUsesStaleCachedAttachmentWhenRefreshFails(t *testing.T) {
+	tmp := t.TempDir()
+	attachmentOK := true
+	body := "old attachment"
+	server := attachmentServer(t, &attachmentOK, &body)
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true, tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	attachmentOK = false
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := content.Attachments[0]
+	if att.Status != "cached-stale" || !warningsContain(att.Warnings, "using stale cached attachment-abc.bin") {
+		t.Fatalf("attachment = %+v", att)
+	}
+	got, err := os.ReadFile(filepath.Join(opts.outDir, filepath.FromSlash(att.AssetPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old attachment" {
+		t.Fatalf("attachment body = %q", got)
+	}
+}
+
+func TestFetchWorkItemRefreshesChangedAttachment(t *testing.T) {
+	tmp := t.TempDir()
+	attachmentOK := true
+	body := "old attachment"
+	server := attachmentServer(t, &attachmentOK, &body)
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), includeAttachments: true, tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	body = "new attachment"
+	content, err := fetchWorkItem(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := content.Attachments[0]
+	if att.Status != "downloaded" || att.AssetPath == "" {
+		t.Fatalf("attachment = %+v", att)
+	}
+	got, err := os.ReadFile(filepath.Join(opts.outDir, filepath.FromSlash(att.AssetPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new attachment" {
+		t.Fatalf("attachment body = %q", got)
+	}
+}
+
+func TestNoCacheBypassesStaleFallback(t *testing.T) {
+	tmp := t.TempDir()
+	failWorkItem := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			if failWorkItem {
+				http.Error(w, "temporary outage", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": "Cached", "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{id: "123", org: server.URL + "/org", project: "proj", outDir: filepath.Join(tmp, "out"), cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token")}
+	if _, err := fetchWorkItem(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	failWorkItem = true
+	opts.noCache = true
+	if _, err := fetchWorkItem(context.Background(), opts); err == nil {
+		t.Fatal("expected --no-cache fetch to fail instead of using stale cache")
 	}
 }
 
@@ -172,6 +435,54 @@ func TestFetchWorkItemTreeDefaultsOutputUnderCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".ado-query")); !os.IsNotExist(err) {
 		t.Fatalf("default output created cwd .ado-query: %v", err)
+	}
+}
+
+func TestFetchWorkItemTreePropagatesItemWarnings(t *testing.T) {
+	tmp := t.TempDir()
+	failWorkItem := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			if failWorkItem {
+				http.Error(w, "temporary outage", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        123,
+				"fields":    map[string]any{"System.Title": "Root", "System.State": "Active"},
+				"relations": []any{},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := queryOptions{
+		id: "123", org: server.URL + "/org", project: "proj",
+		cacheDir: filepath.Join(tmp, "cache"), tokenProvider: staticTokenProvider("token"),
+	}
+	if _, err := fetchWorkItemTree(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	failWorkItem = true
+	content, err := fetchWorkItemTree(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !warningsContain(content.Warnings, "work item 123: using stale cached work-item-123.json") {
+		t.Fatalf("warnings = %+v", content.Warnings)
+	}
+	opts.tree = true
+	body, err := os.ReadFile(filepath.Join(defaultOutputDir(opts), "content.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "work item 123: using stale cached work-item-123.json") {
+		t.Fatalf("tree markdown did not include warning: %s", body)
 	}
 }
 
@@ -342,6 +653,47 @@ func TestParseStandardQueryFlagsUsesEnvAndFlagsAfterPositionals(t *testing.T) {
 	if strings.Join(positionals, ",") != "repo,completed" {
 		t.Fatalf("positionals = %+v", positionals)
 	}
+}
+
+func attachmentServer(t *testing.T, attachmentOK *bool, attachmentBody *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/org/_apis/wit/workitems/123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     123,
+				"fields": map[string]any{"System.Title": "Example", "System.State": "Active"},
+				"relations": []any{map[string]any{
+					"rel":        "AttachedFile",
+					"url":        serverURL(r) + "/org/_apis/wit/attachments/abc?fileName=one.bin",
+					"attributes": map[string]any{"name": "one.bin"},
+				}},
+			})
+		case "/org/proj/_apis/wit/workItems/123/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		case "/org/_apis/wit/attachments/abc":
+			if !*attachmentOK {
+				http.Error(w, "attachment unavailable", http.StatusBadGateway)
+				return
+			}
+			body := "attachment"
+			if attachmentBody != nil {
+				body = *attachmentBody
+			}
+			_, _ = io.WriteString(w, body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func warningsContain(warnings []string, want string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func serverURL(r *http.Request) string {
