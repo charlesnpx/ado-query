@@ -47,6 +47,9 @@ func fetchWorkItemTree(ctx context.Context, opts queryOptions) (treeContent, err
 		if err != nil {
 			return treeContent{}, err
 		}
+		for _, warning := range content.Warnings {
+			warnings = append(warnings, fmt.Sprintf("work item %s: %s", item.id, warning))
+		}
 		nodes = append(nodes, treeNode{
 			ID: item.id, URL: content.URL, Depth: item.depth, Path: append([]string(nil), item.path...),
 			Fields: content.Fields, Relations: content.Relations, ItemPath: filepath.ToSlash(filepath.Join("items", item.id)),

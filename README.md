@@ -10,7 +10,9 @@
 - `raw/comments.json`
 - optional `attachments/<guid>__<filename>` and `.md` conversions
 
-There is no shared context library, no manifest, and no on-disk schema contract beyond the JSON files themselves.
+`work-item` and `work-item-tree` validate cached work item JSON, comments, and included attachments on every run. If Azure DevOps says cached content is unchanged, the cached files are reused. If refresh fails but a cached artifact exists, output is still generated with stale-cache warnings. Missing attachments are retried on every `--include-attachments` run and reported with a status in `content.md` and `content.json`.
+
+There is no shared context library or manifest. Cache metadata sidecars such as `work-item-123.meta.json`, `comments-123.meta.json`, and `attachment-<guid>.meta.json` are internal implementation details, not a context schema.
 
 ## Install
 
@@ -52,15 +54,23 @@ Common flags:
 - `--project <project>` defaults to `$ADO_PROJECT`
 - `--out <dir>` defaults to `~/.cache/ado-query/outputs/<org>/<project>/work-items/<id>`
 - `--cache-dir <dir>` defaults to `~/.cache/ado-query`
-- `--no-cache` bypasses cache reads and writes
+- `--no-cache` bypasses cache reads, writes, and stale-cache fallback
 - `--api-version <ver>` defaults to `7.1`
-- `--include-attachments` downloads attachments and tries `markitdown`
+- `--include-attachments` downloads or revalidates attachments and tries `markitdown`
 - `--max-attachment-bytes <n>` defaults to `25000000`
 - `--top <n>` controls `search-code` result count, default `25`
 
 `work-item-tree` also accepts `--max-depth` and `--max-items`; its omitted `--out` default is `~/.cache/ado-query/outputs/<org>/<project>/work-item-trees/<id>`.
 
 Pass an explicit relative `--out` if you want output materialized in the caller's directory.
+
+Attachment statuses are:
+
+- `discovered`: attachment was found but `--include-attachments` was not used
+- `downloaded`: attachment was fetched or refreshed from Azure DevOps
+- `validated`: cached attachment was checked and Azure DevOps reported it unchanged
+- `cached-stale`: refresh failed, so a cached attachment was used with a warning
+- `missing`: attachment could not be downloaded and no cached copy was available
 
 The raw query commands print JSON to stdout and do not materialize output directories:
 

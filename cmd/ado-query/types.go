@@ -44,6 +44,7 @@ type attachment struct {
 	OriginalFilename string   `json:"originalFilename"`
 	Extension        string   `json:"extension"`
 	Sources          []string `json:"sources"`
+	Status           string   `json:"status,omitempty"`
 	AssetPath        string   `json:"assetPath,omitempty"`
 	MarkdownPath     string   `json:"markdownPath,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`

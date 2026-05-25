@@ -25,8 +25,10 @@ ado-query search-code "<text>"
 ado-query api <path-or-url>
 ```
 
-The CLI writes `content.md`, `content.json`, raw payloads, and optional attachment files to the output directory, which defaults to `~/.cache/ado-query/outputs/...`. Prefer `content.md` for normal context. Pass `--out <dir>` only when a caller-local output directory is required.
+The CLI writes `content.md`, `content.json`, raw payloads, and optional attachment files to the output directory, which defaults to `~/.cache/ado-query/outputs/...`. Always run the CLI for current context instead of trusting an old output directory directly; `work-item` and `work-item-tree` validate cached work items, comments, and included attachments on every run, and they report stale or missing cache coverage in warnings. Prefer `content.md` for normal context. Pass `--out <dir>` only when a caller-local output directory is required.
 
 The standalone query commands print raw JSON to stdout. Use them for focused reads such as comments, PR metadata, PR review threads, WIQL results, code search, or generic read-only API calls.
 
 Auth comes from Azure CLI Microsoft Entra credentials, not an Azure DevOps PAT. Required setup: `az` on PATH, `az login`, and `ADO_ORG`. `ADO_PROJECT` is needed for comments.
+
+Use `--include-attachments` when attached artifacts matter. Check attachment status and warnings in `content.md` or `content.json`; missing attachments are retried on later runs.

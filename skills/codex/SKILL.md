@@ -25,10 +25,10 @@ ado-query search-code "<text>"
 ado-query api <path-or-url>
 ```
 
-The CLI writes `content.md`, `content.json`, raw payloads, and optional attachments under its output directory, which defaults to `~/.cache/ado-query/outputs/...`. Read `content.md` first, then inspect `content.json`, `raw/`, or `attachments/` when needed. Pass `--out <dir>` only when a caller-local output directory is required.
+The CLI writes `content.md`, `content.json`, raw payloads, and optional attachments under its output directory, which defaults to `~/.cache/ado-query/outputs/...`. Always run the CLI for current context instead of trusting an old output directory directly; `work-item` and `work-item-tree` validate cached work items, comments, and included attachments on every run, and they report stale or missing cache coverage in warnings. Read `content.md` first, then inspect `content.json`, `raw/`, or `attachments/` when needed. Pass `--out <dir>` only when a caller-local output directory is required.
 
 The standalone query commands print raw JSON to stdout. Use them when you need a narrow read such as comments, PR metadata, PR review threads, WIQL results, code search, or an arbitrary read-only API endpoint.
 
 Auth comes from Azure CLI Microsoft Entra credentials, not an Azure DevOps PAT. The user must be logged in with `az login`; `ADO_ORG` supplies the organization, and `ADO_PROJECT` enables comments.
 
-Use `--include-attachments` when attached artifacts matter. HTML fields and comments are converted through `markitdown` when available; otherwise the original HTML is preserved in fenced blocks.
+Use `--include-attachments` when attached artifacts matter. Check attachment status and warnings in `content.md` or `content.json`; missing attachments are retried on later runs. HTML fields and comments are converted through `markitdown` when available; otherwise the original HTML is preserved in fenced blocks.
