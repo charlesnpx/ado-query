@@ -52,15 +52,15 @@ Common flags:
 
 - `--org <org>` defaults to `$ADO_ORG`
 - `--project <project>` defaults to `$ADO_PROJECT`
-- `--out <dir>` defaults to `~/.cache/ado-query/outputs/<org>/<project>/work-items/<id>`
-- `--cache-dir <dir>` defaults to `~/.cache/ado-query`
+- `--out <dir>` defaults to `~/ado-query-cache/outputs/<org>/<project>/work-items/<id>`
+- `--cache-dir <dir>` defaults to `~/ado-query-cache`
 - `--no-cache` bypasses cache reads, writes, and stale-cache fallback
 - `--api-version <ver>` defaults to `7.1`
 - `--include-attachments` downloads or revalidates attachments and tries `markitdown`
 - `--max-attachment-bytes <n>` defaults to `25000000`
 - `--top <n>` controls `search-code` result count, default `25`
 
-`work-item-tree` also accepts `--max-depth` and `--max-items`; its omitted `--out` default is `~/.cache/ado-query/outputs/<org>/<project>/work-item-trees/<id>`.
+`work-item-tree` also accepts `--max-depth` and `--max-items`; its omitted `--out` default is `~/ado-query-cache/outputs/<org>/<project>/work-item-trees/<id>`.
 
 Pass an explicit relative `--out` if you want output materialized in the caller's directory.
 
