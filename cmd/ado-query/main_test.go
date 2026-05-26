@@ -31,6 +31,23 @@ func (p failAfterTokenProvider) Token(context.Context) (string, error) {
 	return p.token, nil
 }
 
+func TestDefaultCacheDirUsesVisibleHomePath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	dir, err := defaultCacheDir("ado-query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(tmp, "ado-query-cache")
+	if dir != want {
+		t.Fatalf("default cache dir = %q, want %q", dir, want)
+	}
+	if strings.HasPrefix(filepath.Base(dir), ".") {
+		t.Fatalf("default cache dir should not be hidden: %q", dir)
+	}
+}
+
 func TestDiscoverAttachmentsFromHTMLAndRelations(t *testing.T) {
 	workItem := map[string]any{
 		"fields":    map[string]any{"System.Description": `<img src="https://dev.azure.com/o/p/_apis/wit/attachments/abc?fileName=one.png">`},

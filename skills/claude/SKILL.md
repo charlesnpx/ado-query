@@ -25,7 +25,7 @@ ado-query search-code "<text>"
 ado-query api <path-or-url>
 ```
 
-The CLI writes `content.md`, `content.json`, raw payloads, and optional attachment files to the output directory, which defaults to `~/.cache/ado-query/outputs/...`. Always run the CLI for current context instead of trusting an old output directory directly; `work-item` and `work-item-tree` validate cached work items, comments, and included attachments on every run, and they report stale or missing cache coverage in warnings. Prefer `content.md` for normal context. Pass `--out <dir>` only when a caller-local output directory is required.
+The CLI writes `content.md`, `content.json`, raw payloads, and optional attachment files to the output directory, which defaults to `~/ado-query-cache/outputs/...` so agents can inspect it directly without hidden-directory approval. Always run the CLI for current context instead of trusting an old output directory directly; `work-item` and `work-item-tree` validate cached work items, comments, and included attachments on every run, and they report stale or missing cache coverage in warnings. Prefer `content.md` for normal context. Pass `--out <dir>` only when a caller-local output directory is required.
 
 The standalone query commands print raw JSON to stdout. Use them for focused reads such as comments, PR metadata, PR review threads, WIQL results, code search, or generic read-only API calls.
 
